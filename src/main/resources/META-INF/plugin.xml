@@ -39,14 +39,4 @@
                 factoryClass="com.example.codescribe.CodeScribeToolWindowFactory"/>
   </extensions>
 
-  <!-- Actions defined by the plugin -->
-  <actions>
-    <!-- Add a simple action to get started -->
-    <action id="CodeScribe.HelloAction"
-            class="com.example.codescribe.HelloAction"
-            text="Hello CodeScribe"
-            description="Example action from CodeScribe plugin">
-      <add-to-group group-id="ToolsMenu" anchor="last"/>
-    </action>
-  </actions>
 </idea-plugin>
