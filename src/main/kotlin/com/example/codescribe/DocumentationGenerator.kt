@@ -27,7 +27,8 @@ class DocumentationGenerator(private val project: Project) {
         javaFiles.forEach { file ->
             val psiFile = PsiManager.getInstance(project).findFile(file)
             psiFile?.let {
-                allClasses.addAll(PsiTreeUtil.findChildrenOfType(it, PsiClass::class.java))
+                val classes = PsiTreeUtil.findChildrenOfType(it, PsiClass::class.java)
+                allClasses.addAll(classes)
             }
         }
 
@@ -50,95 +51,93 @@ class DocumentationGenerator(private val project: Project) {
     }
 
     private fun generateAdvancedDocumentation(file: VirtualFile): String {
-        return ApplicationManager.getApplication().runReadAction<String> {
-            val psiFile = PsiManager.getInstance(project).findFile(file) ?: return@runReadAction ""
-            val classes = PsiTreeUtil.findChildrenOfType(psiFile, PsiClass::class.java).toList()
+        val psiFile = PsiManager.getInstance(project).findFile(file) ?: return ""
+        val classes = PsiTreeUtil.findChildrenOfType(psiFile, PsiClass::class.java).toList()
 
-            if (classes.isEmpty()) return@runReadAction ""
+        if (classes.isEmpty()) return ""
 
-            val builder = StringBuilder()
+        val builder = StringBuilder()
 
-            for (cls in classes) {
-                builder.append("## 🎯 ${cls.name} (${file.name})\n\n")
+        for (cls in classes) {
+            builder.append("## 🎯 ${cls.name} (${file.name})\n\n")
 
-                // Package and location info
-                val packageName = getPackageName(psiFile)
-                if (packageName.isNotEmpty()) {
-                    builder.append("📍 **Package:** `$packageName`\n\n")
-                }
-
-                // Class type and purpose analysis
-                val classAnalysis = codeAnalyzer.analyzeClass(cls)
-                builder.append("### 🧠 Intelligent Analysis\n")
-                builder.append("**Purpose:** ${classAnalysis.purpose}\n\n")
-                builder.append("**Complexity Score:** ${classAnalysis.complexityScore}/10\n\n")
-
-                // Design patterns detected
-                val patterns = patternDetector.detectPatterns(cls)
-                if (patterns.isNotEmpty()) {
-                    builder.append("### 🔍 Design Patterns Detected\n")
-                    patterns.forEach { pattern ->
-                        builder.append("- **${pattern.name}:** ${pattern.description}\n")
-                    }
-                    builder.append("\n")
-                }
-
-                // Dependencies and relationships
-                val relationships = relationshipAnalyzer.getRelationships(cls)
-                if (relationships.isNotEmpty()) {
-                    builder.append("### 🔗 Class Relationships\n")
-                    relationships.forEach { rel ->
-                        builder.append("- **${rel.type}:** ${rel.targetClass} - ${rel.description}\n")
-                    }
-                    builder.append("\n")
-                }
-
-                // Method analysis
-                val methods = cls.methods.filter { !it.isConstructor }
-                if (methods.isNotEmpty()) {
-                    builder.append("### 🛠️ Method Analysis\n")
-                    methods.forEach { method ->
-                        val methodAnalysis = codeAnalyzer.analyzeMethod(method)
-                        builder.append("**${method.name}()** (Complexity: ${methodAnalysis.complexity})\n")
-                        builder.append("- ${methodAnalysis.description}\n")
-                        if (methodAnalysis.patterns.isNotEmpty()) {
-                            builder.append("- Patterns: ${methodAnalysis.patterns.joinToString(", ")}\n")
-                        }
-                        if (methodAnalysis.potentialIssues.isNotEmpty()) {
-                            builder.append("- ⚠️ Issues: ${methodAnalysis.potentialIssues.joinToString(", ")}\n")
-                        }
-                        builder.append("\n")
-                    }
-                }
-
-                // Field analysis
-                val fields = cls.fields
-                if (fields.isNotEmpty()) {
-                    builder.append("### 📋 Field Analysis\n")
-                    fields.forEach { field ->
-                        val fieldAnalysis = codeAnalyzer.analyzeField(field)
-                        builder.append("- **${field.name}:** ${fieldAnalysis}\n")
-                    }
-                    builder.append("\n")
-                }
-
-                // Code quality insights
-                val qualityInsights = codeAnalyzer.analyzeCodeQuality(cls)
-                if (qualityInsights.isNotEmpty()) {
-                    builder.append("### 💡 Code Quality Insights\n")
-                    qualityInsights.forEach { insight ->
-                        builder.append("- ${insight}\n")
-                    }
-                    builder.append("\n")
-                }
-
-                // Usage examples and recommendations
-                builder.append("### 💭 Developer Notes\n")
-                builder.append("${generateDeveloperNotes(cls, classAnalysis)}\n\n")
+            // Package and location info
+            val packageName = getPackageName(psiFile)
+            if (packageName.isNotEmpty()) {
+                builder.append("📍 **Package:** `$packageName`\n\n")
             }
 
-            builder.toString()
+            // Class type and purpose analysis
+            val classAnalysis = codeAnalyzer.analyzeClass(cls)
+            builder.append("### 🧠 Intelligent Analysis\n")
+            builder.append("**Purpose:** ${classAnalysis.purpose}\n\n")
+            builder.append("**Complexity Score:** ${classAnalysis.complexityScore}/10\n\n")
+
+            // Design patterns detected
+            val patterns = patternDetector.detectPatterns(cls)
+            if (patterns.isNotEmpty()) {
+                builder.append("### 🔍 Design Patterns Detected\n")
+                patterns.forEach { pattern ->
+                    builder.append("- **${pattern.name}:** ${pattern.description}\n")
+                }
+                builder.append("\n")
+            }
+
+            // Dependencies and relationships
+            val relationships = relationshipAnalyzer.getRelationships(cls)
+            if (relationships.isNotEmpty()) {
+                builder.append("### 🔗 Class Relationships\n")
+                relationships.forEach { rel ->
+                    builder.append("- **${rel.type}:** ${rel.targetClass} - ${rel.description}\n")
+                }
+                builder.append("\n")
+            }
+
+            // Method analysis
+            val methods = cls.methods.filter { !it.isConstructor }
+            if (methods.isNotEmpty()) {
+                builder.append("### 🛠️ Method Analysis\n")
+                methods.forEach { method ->
+                    val methodAnalysis = codeAnalyzer.analyzeMethod(method)
+                    builder.append("**${method.name}()** (Complexity: ${methodAnalysis.complexity})\n")
+                    builder.append("- ${methodAnalysis.description}\n")
+                    if (methodAnalysis.patterns.isNotEmpty()) {
+                        builder.append("- Patterns: ${methodAnalysis.patterns.joinToString(", ")}\n")
+                    }
+                    if (methodAnalysis.potentialIssues.isNotEmpty()) {
+                        builder.append("- ⚠️ Issues: ${methodAnalysis.potentialIssues.joinToString(", ")}\n")
+                    }
+                    builder.append("\n")
+                }
+            }
+
+            // Field analysis
+            val fields = cls.fields
+            if (fields.isNotEmpty()) {
+                builder.append("### 📋 Field Analysis\n")
+                fields.forEach { field ->
+                    val fieldAnalysis = codeAnalyzer.analyzeField(field)
+                    builder.append("- **${field.name}:** ${fieldAnalysis}\n")
+                }
+                builder.append("\n")
+            }
+
+            // Code quality insights
+            val qualityInsights = codeAnalyzer.analyzeCodeQuality(cls)
+            if (qualityInsights.isNotEmpty()) {
+                builder.append("### 💡 Code Quality Insights\n")
+                qualityInsights.forEach { insight ->
+                    builder.append("- ${insight}\n")
+                }
+                builder.append("\n")
+            }
+
+            // Usage examples and recommendations
+            builder.append("### 💭 Developer Notes\n")
+            builder.append("${generateDeveloperNotes(cls, classAnalysis)}\n\n")
         }
+
+        return builder.toString()
     }
 
     private fun generateProjectSummary(allClasses: List<PsiClass>): String {

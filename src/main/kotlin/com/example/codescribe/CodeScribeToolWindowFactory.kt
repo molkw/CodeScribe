@@ -102,9 +102,9 @@ class CodeScribeToolWindowContent(private val project: Project) {
         // Run analysis in background thread with proper read action
         Thread {
             try {
-                val generator = DocumentationGenerator(project)
-                // Wrap PSI operations in read action
-                val fullDocumentation = com.intellij.openapi.application.ApplicationManager.getApplication().runReadAction<String> {
+                // Wrap ALL PSI operations in read action
+                val fullDocumentation = ApplicationManager.getApplication().runReadAction<String> {
+                    val generator = DocumentationGenerator(project)
                     generator.generateProjectDocumentation()
                 }
 
@@ -148,48 +148,80 @@ class CodeScribeToolWindowContent(private val project: Project) {
     private fun parseDocumentationSections(documentation: String): Map<String, List<String>> {
         val sections = mutableMapOf<String, MutableList<String>>()
         val lines = documentation.lines()
+        var currentClassContent = StringBuilder()
         var currentSection = "overview"
         var currentContent = StringBuilder()
 
         for (line in lines) {
             when {
                 line.startsWith("# 📚 Advanced Project Analysis") -> {
+                    // Start of overview section
                     currentSection = "overview"
                     currentContent.append(line).append("\n")
                 }
                 line.startsWith("## 🎯") -> {
-                    if (currentContent.isNotEmpty()) {
-                        sections.getOrPut(currentSection) { mutableListOf() }.add(currentContent.toString())
+                    // Save previous class content if exists
+                    if (currentClassContent.isNotEmpty()) {
+                        sections.getOrPut("classDetails") { mutableListOf() }.add(currentClassContent.toString())
                     }
-                    currentSection = "classDetails"
-                    currentContent = StringBuilder(line).append("\n")
-                }
-                line.startsWith("### 🔍 Design Patterns") -> {
-                    currentSection = "patterns"
-                    currentContent.append(line).append("\n")
-                }
-                line.startsWith("### 🔗 Class Relationships") -> {
-                    currentSection = "relationships"
-                    currentContent.append(line).append("\n")
-                }
-                line.startsWith("### 💡 Code Quality Insights") -> {
-                    currentSection = "insights"
-                    currentContent.append(line).append("\n")
+                    // Start new class content
+                    currentClassContent = StringBuilder(line).append("\n")
                 }
                 line.startsWith("# 📊 Project Summary") -> {
+                    // Save any remaining class content
+                    if (currentClassContent.isNotEmpty()) {
+                        sections.getOrPut("classDetails") { mutableListOf() }.add(currentClassContent.toString())
+                        currentClassContent.clear()
+                    }
+                    // Save any other content
                     if (currentContent.isNotEmpty()) {
                         sections.getOrPut(currentSection) { mutableListOf() }.add(currentContent.toString())
                     }
+                    // Start project summary
                     currentSection = "overview"
                     currentContent = StringBuilder(line).append("\n")
                 }
+                line.startsWith("=".repeat(80)) -> {
+                    // Class separator - save current class content
+                    if (currentClassContent.isNotEmpty()) {
+                        sections.getOrPut("classDetails") { mutableListOf() }.add(currentClassContent.toString())
+                        currentClassContent.clear()
+                    }
+                }
                 else -> {
-                    currentContent.append(line).append("\n")
+                    // Regular line - add to appropriate section
+                    if (currentClassContent.isNotEmpty()) {
+                        // We're inside a class section
+                        currentClassContent.append(line).append("\n")
+
+                        // Also categorize specific subsections for other tabs
+                        when {
+                            line.startsWith("### 🔍 Design Patterns") ||
+                                    line.contains("Pattern:") -> {
+                                sections.getOrPut("patterns") { mutableListOf() }.add(line)
+                            }
+                            line.startsWith("### 🔗 Class Relationships") ||
+                                    line.contains("**Inheritance") || line.contains("**Implementation") ||
+                                    line.contains("**Dependency") || line.contains("**Usage") -> {
+                                sections.getOrPut("relationships") { mutableListOf() }.add(line)
+                            }
+                            line.startsWith("### 💡 Code Quality Insights") ||
+                                    line.contains("⚠️") || line.contains("💡") -> {
+                                sections.getOrPut("insights") { mutableListOf() }.add(line)
+                            }
+                        }
+                    } else {
+                        // We're in overview or other sections
+                        currentContent.append(line).append("\n")
+                    }
                 }
             }
         }
 
-        // Add the last section
+        // Add any remaining content
+        if (currentClassContent.isNotEmpty()) {
+            sections.getOrPut("classDetails") { mutableListOf() }.add(currentClassContent.toString())
+        }
         if (currentContent.isNotEmpty()) {
             sections.getOrPut(currentSection) { mutableListOf() }.add(currentContent.toString())
         }
@@ -202,30 +234,41 @@ class CodeScribeToolWindowContent(private val project: Project) {
         overview.append("🎯 CODESCRIBE ANALYSIS COMPLETE!\n")
         overview.append("=".repeat(50)).append("\n\n")
 
-        // Add project summary
+        // Add project summary content
         sections["overview"]?.forEach { section ->
-            if (section.contains("Project Summary")) {
-                overview.append(section).append("\n")
+            if (section.contains("Project Summary") || section.contains("Advanced Project Analysis")) {
+                // Clean up debug lines and focus on summary content
+                val cleanSection = section.lines()
+                        .filter { line ->
+                            !line.contains("🔍 DEBUG:") &&
+                                    line.trim().isNotEmpty()
+                        }
+                        .joinToString("\n")
+                overview.append(cleanSection).append("\n")
             }
         }
 
-        // Add quick stats
+        // Add quick statistics
         val classCount = sections["classDetails"]?.size ?: 0
-        val patternCount = sections["patterns"]?.sumOf { it.split("Design Patterns Detected").size - 1 } ?: 0
-        val relationshipCount = sections["relationships"]?.sumOf { it.split("Class Relationships").size - 1 } ?: 0
+        val totalPatterns = sections["classDetails"]?.sumOf { section ->
+            section.split("### 🔍 Design Patterns Detected").size - 1
+        } ?: 0
+        val totalRelationships = sections["classDetails"]?.sumOf { section ->
+            section.split("### 🔗 Class Relationships").size - 1
+        } ?: 0
 
-        overview.append("📈 QUICK STATISTICS\n")
-        overview.append("-".repeat(20)).append("\n")
+        overview.append("\n📈 ANALYSIS STATISTICS\n")
+        overview.append("-".repeat(25)).append("\n")
         overview.append("Classes Analyzed: $classCount\n")
-        overview.append("Design Patterns Found: $patternCount\n")
-        overview.append("Relationships Mapped: $relationshipCount\n\n")
+        overview.append("Design Patterns Found: $totalPatterns\n")
+        overview.append("Relationship Mappings: $totalRelationships\n\n")
 
-        overview.append("💡 NEXT STEPS\n")
-        overview.append("-".repeat(15)).append("\n")
-        overview.append("• Check 'Class Details' tab for in-depth analysis\n")
-        overview.append("• Review 'Patterns' tab for design pattern insights\n")
-        overview.append("• Explore 'Relationships' tab for architecture overview\n")
-        overview.append("• Read 'Insights' tab for improvement recommendations\n")
+        overview.append("💡 NAVIGATION GUIDE\n")
+        overview.append("-".repeat(20)).append("\n")
+        overview.append("• 'Class Details' - In-depth analysis of each class\n")
+        overview.append("• 'Patterns' - Design patterns discovered in your code\n")
+        overview.append("• 'Relationships' - How your classes interact\n")
+        overview.append("• 'Insights' - Code quality recommendations\n")
 
         return overview.toString()
     }
@@ -236,7 +279,23 @@ class CodeScribeToolWindowContent(private val project: Project) {
         details.append("=".repeat(40)).append("\n\n")
 
         sections["classDetails"]?.forEach { classSection ->
-            details.append(classSection).append("\n")
+            // Clean up the class section content
+            val cleanedSection = classSection.lines()
+                    .filter { it.trim().isNotEmpty() }
+                    .joinToString("\n")
+
+            if (cleanedSection.isNotEmpty()) {
+                details.append(cleanedSection).append("\n\n")
+                details.append("-".repeat(60)).append("\n\n")
+            }
+        }
+
+        if (details.length <= 100) {
+            details.append("ℹ️ No class details available.\n")
+            details.append("This could mean:\n")
+            details.append("• No Java classes found in the project\n")
+            details.append("• Classes couldn't be analyzed\n")
+            details.append("• Parsing errors occurred\n")
         }
 
         return details.toString()
@@ -247,21 +306,67 @@ class CodeScribeToolWindowContent(private val project: Project) {
         patterns.append("🔍 DESIGN PATTERNS DETECTED\n")
         patterns.append("=".repeat(35)).append("\n\n")
 
-        // Extract pattern information from all sections
-        sections.values.flatten().forEach { section ->
-            if (section.contains("Design Patterns Detected")) {
-                val patternSection = section.substringAfter("Design Patterns Detected")
-                        .substringBefore("### 🔗")
-                        .substringBefore("### 💡")
-                        .substringBefore("### 🛠️")
-                patterns.append(patternSection).append("\n")
+        var hasContent = false
+
+        // Extract pattern information from class details sections
+        sections["classDetails"]?.forEach { classSection ->
+            val lines = classSection.lines()
+            var inPatternSection = false
+            var currentClassTitle = ""
+
+            for (line in lines) {
+                when {
+                    line.startsWith("## 🎯") -> {
+                        currentClassTitle = line.removePrefix("## 🎯 ").trim()
+                        inPatternSection = false
+                    }
+                    line.startsWith("### 🔍 Design Patterns Detected") -> {
+                        inPatternSection = true
+                        if (currentClassTitle.isNotEmpty()) {
+                            patterns.append("**$currentClassTitle:**\n")
+                            hasContent = true
+                        }
+                    }
+                    line.startsWith("###") && !line.contains("🔍") -> {
+                        inPatternSection = false
+                    }
+                    inPatternSection && line.trim().startsWith("- **") -> {
+                        patterns.append("  ${line.trim()}\n")
+                        hasContent = true
+                    }
+                }
+            }
+            if (hasContent && inPatternSection) {
+                patterns.append("\n")
             }
         }
 
-        if (patterns.length <= 50) {
+        // Also check project summary for architectural patterns
+        sections["overview"]?.forEach { overviewSection ->
+            if (overviewSection.contains("🏗️ Architecture Patterns")) {
+                patterns.append("🏗️ **Project-Level Architecture Patterns:**\n")
+                val lines = overviewSection.lines()
+                var inArchPatterns = false
+
+                for (line in lines) {
+                    when {
+                        line.contains("🏗️ Architecture Patterns") -> inArchPatterns = true
+                        line.startsWith("###") && !line.contains("🏗️") -> inArchPatterns = false
+                        inArchPatterns && line.trim().startsWith("- **") -> {
+                            patterns.append("  ${line.trim()}\n")
+                            hasContent = true
+                        }
+                    }
+                }
+                patterns.append("\n")
+            }
+        }
+
+        if (!hasContent) {
             patterns.append("ℹ️ No specific design patterns detected in this analysis.\n")
             patterns.append("This doesn't mean the code is bad - it might be using simpler patterns\n")
-            patterns.append("or following domain-specific architectural styles.\n")
+            patterns.append("or following domain-specific architectural styles that aren't covered\n")
+            patterns.append("by traditional GoF design patterns.\n")
         }
 
         return patterns.toString()
@@ -272,15 +377,47 @@ class CodeScribeToolWindowContent(private val project: Project) {
         relationships.append("🔗 CLASS RELATIONSHIPS\n")
         relationships.append("=".repeat(30)).append("\n\n")
 
-        // Extract relationship information
-        sections.values.flatten().forEach { section ->
-            if (section.contains("Class Relationships")) {
-                val relationshipSection = section.substringAfter("Class Relationships")
-                        .substringBefore("### 🛠️")
-                        .substringBefore("### 💡")
-                        .substringBefore("### 📋")
-                relationships.append(relationshipSection).append("\n")
+        var hasContent = false
+
+        // Extract relationship information from class details sections
+        sections["classDetails"]?.forEach { classSection ->
+            val lines = classSection.lines()
+            var inRelationshipSection = false
+            var currentClassTitle = ""
+
+            for (line in lines) {
+                when {
+                    line.startsWith("## 🎯") -> {
+                        currentClassTitle = line.removePrefix("## 🎯 ").trim()
+                        inRelationshipSection = false
+                    }
+                    line.startsWith("### 🔗 Class Relationships") -> {
+                        inRelationshipSection = true
+                        if (currentClassTitle.isNotEmpty()) {
+                            relationships.append("**$currentClassTitle:**\n")
+                            hasContent = true
+                        }
+                    }
+                    line.startsWith("###") && !line.contains("🔗") -> {
+                        inRelationshipSection = false
+                    }
+                    inRelationshipSection && line.trim().startsWith("- **") -> {
+                        relationships.append("  ${line.trim()}\n")
+                        hasContent = true
+                    }
+                }
             }
+            if (hasContent && inRelationshipSection) {
+                relationships.append("\n")
+            }
+        }
+
+        if (!hasContent) {
+            relationships.append("ℹ️ No class relationships detected in this analysis.\n")
+            relationships.append("This could mean:\n")
+            relationships.append("• Classes are mostly independent\n")
+            relationships.append("• Simple project structure\n")
+            relationships.append("• Limited inheritance or composition patterns\n")
         }
 
         return relationships.toString()
@@ -291,18 +428,59 @@ class CodeScribeToolWindowContent(private val project: Project) {
         insights.append("💡 CODE QUALITY INSIGHTS & RECOMMENDATIONS\n")
         insights.append("=".repeat(50)).append("\n\n")
 
-        // Extract insights from all sections
-        sections.values.flatten().forEach { section ->
-            if (section.contains("Code Quality Insights")) {
-                val insightsSection = section.substringAfter("Code Quality Insights")
-                        .substringBefore("### 💭")
-                        .substringBefore("### 🎯")
-                insights.append(insightsSection).append("\n")
+        var hasContent = false
+
+        // Extract insights from class details sections
+        sections["classDetails"]?.forEach { classSection ->
+            val lines = classSection.lines()
+            var inInsightsSection = false
+            var inDeveloperNotesSection = false
+            var currentClassTitle = ""
+
+            for (line in lines) {
+                when {
+                    line.startsWith("## 🎯") -> {
+                        currentClassTitle = line.removePrefix("## 🎯 ").trim()
+                        inInsightsSection = false
+                        inDeveloperNotesSection = false
+                    }
+                    line.startsWith("### 💡 Code Quality Insights") -> {
+                        inInsightsSection = true
+                        inDeveloperNotesSection = false
+                        if (currentClassTitle.isNotEmpty()) {
+                            insights.append("**$currentClassTitle:**\n")
+                            hasContent = true
+                        }
+                    }
+                    line.startsWith("### 💭 Developer Notes") -> {
+                        inDeveloperNotesSection = true
+                        inInsightsSection = false
+                    }
+                    line.startsWith("###") && !line.contains("💡") && !line.contains("💭") -> {
+                        inInsightsSection = false
+                        inDeveloperNotesSection = false
+                    }
+                    (inInsightsSection || inDeveloperNotesSection) && line.trim().startsWith("- ") -> {
+                        insights.append("  ${line.trim()}\n")
+                        hasContent = true
+                    }
+                    inDeveloperNotesSection && line.trim().isNotEmpty() && !line.startsWith("#") -> {
+                        insights.append("  • ${line.trim()}\n")
+                        hasContent = true
+                    }
+                }
             }
-            if (section.contains("Developer Notes")) {
-                val notesSection = section.substringAfter("Developer Notes")
-                insights.append(notesSection).append("\n")
+            if (hasContent && (inInsightsSection || inDeveloperNotesSection)) {
+                insights.append("\n")
             }
+        }
+
+        if (!hasContent) {
+            insights.append("ℹ️ No specific code quality issues detected.\n")
+            insights.append("This suggests:\n")
+            insights.append("• Well-structured code\n")
+            insights.append("• Good coding practices followed\n")
+            insights.append("• Classes have appropriate complexity levels\n")
         }
 
         return insights.toString()
