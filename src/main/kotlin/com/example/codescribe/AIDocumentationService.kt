@@ -79,6 +79,20 @@ data class HealthResponse(
         val codeOptimized: Boolean
 )
 
+data class QuestionRequest(
+        @SerializedName("question")
+        val question: String,
+        @SerializedName("documentation_context")
+        val documentationContext: String
+)
+
+data class QuestionResponse(
+        @SerializedName("answer")
+        val answer: String,
+        @SerializedName("processed_locally")
+        val processedLocally: Boolean = false
+)
+
 class AIDocumentationService {
     private val httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -289,6 +303,70 @@ class AIDocumentationService {
             primaryBaseUrl -> "Local (localhost:8000)"
             fallbackBaseUrl -> "Remote (devtunnels.ms)"
             else -> null
+        }
+    }
+
+    /**
+     * Ask a question about the documentation with AI backend
+     */
+    fun askQuestion(question: String, documentationContext: String): String {
+        val baseUrl = getAvailableBaseUrl()
+
+        if (baseUrl == null) {
+            return """
+                ❌ AI Backend unavailable
+                
+                Try simple queries like:
+                • "how many controllers"
+                • "list services" 
+                • "show repositories"
+                • "count entities"
+            """.trimIndent()
+        }
+
+        return try {
+            logger.info("🤔 Asking question to AI backend: $baseUrl")
+            logger.debug("📝 Question: $question")
+
+            val request = QuestionRequest(
+                    question = question,
+                    documentationContext = documentationContext
+            )
+
+            val requestJson = gson.toJson(request)
+            logger.debug("📊 Context size: ${documentationContext.length} characters")
+
+            val httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create("$baseUrl/ask-question"))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(30)) // Shorter timeout for Q&A
+                    .POST(HttpRequest.BodyPublishers.ofString(requestJson))
+                    .build()
+
+            val response = httpClient.send(
+                    httpRequest,
+                    HttpResponse.BodyHandlers.ofString()
+            )
+
+            logger.info("📡 AI backend Q&A response: ${response.statusCode()}")
+
+            when (response.statusCode()) {
+                200 -> {
+                    val questionResponse = gson.fromJson(response.body(), QuestionResponse::class.java)
+                    logger.info("✅ Q&A successful!")
+                    questionResponse.answer
+                }
+                else -> {
+                    logger.warn("❌ AI backend Q&A error: ${response.statusCode()} - ${response.body()}")
+                    "❌ AI backend error: Unable to process question (Status: ${response.statusCode()})"
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("❌ Failed to ask question to AI backend ($baseUrl): ${e.message}", e)
+            // If this backend failed, invalidate the cache to force re-check next time
+            activeBaseUrl = null
+            lastHealthCheckTime = 0L
+            "❌ Connection failed: ${e.message}"
         }
     }
 }

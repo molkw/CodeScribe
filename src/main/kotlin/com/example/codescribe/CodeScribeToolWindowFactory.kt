@@ -1,5 +1,5 @@
 // src/main/kotlin/com/example/codescribe/CodeScribeToolWindowFactory.kt
-// Updated version with proper content distribution
+// Complete version with Q&A functionality integrated
 
 package com.example.codescribe
 
@@ -42,11 +42,18 @@ class CodeScribeToolWindowContent(private val project: Project) {
     private val relationshipsArea = JTextArea()
     private val insightsArea = JTextArea()
 
+    // Q&A Panel components
+    private val questionField = JTextField()
+    private val askButton = JButton("Ask")
+    private val clearQAButton = JButton("Clear Q&A")
+    private val qaHistoryArea = JTextArea()
+
     // Status display
     private val statusLabel = JLabel("Ready to analyze project...")
 
-    // Generator and current results
+    // Generator, Q&A manager and current results
     private val generator = AIIntegratedGenerator(project)
+    private val qaManager = QAManager()
     private var currentResult: DocumentationResult? = null
 
     init {
@@ -63,6 +70,13 @@ class CodeScribeToolWindowContent(private val project: Project) {
             area.lineWrap = true
             area.wrapStyleWord = true
         }
+
+        // Configure Q&A area
+        qaHistoryArea.isEditable = false
+        qaHistoryArea.font = Font("Monospaced", Font.PLAIN, 11)
+        qaHistoryArea.lineWrap = true
+        qaHistoryArea.wrapStyleWord = true
+        qaHistoryArea.text = "💬 Ask questions about your documentation here...\n\nExamples:\n• How many controllers do I have?\n• List all services\n• Explain the architecture\n• What patterns were detected?"
 
         // Add tabs with better descriptions
         tabbedPane.addTab("📊 Overview", JBScrollPane(overviewArea))
@@ -83,9 +97,17 @@ class CodeScribeToolWindowContent(private val project: Project) {
         buttonPanel.add(clearButton)
         buttonPanel.add(exportButton)
 
+        // Setup Q&A panel
+        val qaPanel = setupQAPanel()
+
+        // Create main content panel with tabs
+        val mainContentPanel = JPanel(BorderLayout())
+        mainContentPanel.add(tabbedPane, BorderLayout.CENTER)
+        mainContentPanel.add(qaPanel, BorderLayout.SOUTH)
+
         // Layout
         contentPanel.add(buttonPanel, BorderLayout.NORTH)
-        contentPanel.add(tabbedPane, BorderLayout.CENTER)
+        contentPanel.add(mainContentPanel, BorderLayout.CENTER)
 
         statusLabel.font = Font("SansSerif", Font.ITALIC, 11)
         contentPanel.add(statusLabel, BorderLayout.SOUTH)
@@ -102,6 +124,7 @@ class CodeScribeToolWindowContent(private val project: Project) {
 
         clearButton.addActionListener {
             clearAllTabs()
+            clearQAHistory()
             currentResult = null
             exportButton.isEnabled = false
             statusLabel.text = "Ready to analyze project..."
@@ -109,6 +132,20 @@ class CodeScribeToolWindowContent(private val project: Project) {
 
         exportButton.addActionListener {
             exportToMarkdown()
+        }
+
+        // Q&A listeners
+        askButton.addActionListener {
+            processQuestion()
+        }
+
+        clearQAButton.addActionListener {
+            clearQAHistory()
+        }
+
+        // Allow Enter key to ask question
+        questionField.addActionListener {
+            processQuestion()
         }
     }
 
@@ -153,6 +190,7 @@ class CodeScribeToolWindowContent(private val project: Project) {
         analyzeButton.text = "🔄 Analyzing..."
 
         clearAllTabs()
+        clearQAHistory() // Clear Q&A when new analysis starts
         showAnalysisProgress()
 
         // Run analysis in background with proper read action
@@ -170,9 +208,9 @@ class CodeScribeToolWindowContent(private val project: Project) {
                     analyzeButton.isEnabled = true
 
                     val statusText = if (documentationResult.isAIEnhanced) {
-                        "✅ AI-enhanced analysis completed!"
+                        "✅ AI-enhanced analysis completed! You can now ask questions."
                     } else {
-                        "✅ Static analysis completed!"
+                        "✅ Static analysis completed! You can ask simple questions."
                     }
                     statusLabel.text = statusText
                 }
@@ -383,8 +421,8 @@ This analysis was generated using CodeScribe, an IntelliJ plugin that combines $
         """.trimIndent()
     }
 
+    // Helper methods for content extraction (keeping existing implementation)
     private fun extractExecutiveSummary(result: DocumentationResult): String {
-        // Extract key metrics and overview without redundancy
         val overviewText = result.overview
         val projectStats = extractProjectStats(overviewText)
         val architectureType = extractArchitectureType(overviewText)
@@ -404,7 +442,6 @@ This analysis was generated using CodeScribe, an IntelliJ plugin that combines $
     }
 
     private fun cleanArchitectureSection(result: DocumentationResult): String {
-        // Clean architecture content without emojis and redundancy
         val patternsText = result.patterns
         val architecturalPatterns = extractArchitecturalPatterns(patternsText)
         val layeringQuality = extractLayeringQuality(result.relationships)
@@ -422,7 +459,6 @@ ${layeringQuality}
     }
 
     private fun cleanComponentAnalysis(result: DocumentationResult): String {
-        // Single, clean component breakdown
         val classDetails = result.classDetails
         val packageDistribution = extractPackageDistribution(classDetails)
         val complexityAnalysis = extractComplexityAnalysis(classDetails)
@@ -488,11 +524,9 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
         """.trimIndent()
     }
 
-    // Helper methods for content extraction
+    // Helper methods for content extraction (keeping existing implementations)
     private fun extractProjectStats(text: String): Map<String, String> {
         val stats = mutableMapOf<String, String>()
-
-        // Extract numbers using regex
         val classesMatch = "Classes Analyzed: (\\d+)".toRegex().find(text)
         val controllersMatch = "Controllers: (\\d+)".toRegex().find(text)
         val servicesMatch = "Services: (\\d+)".toRegex().find(text)
@@ -519,13 +553,11 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
 
     private fun extractArchitecturalPatterns(text: String): String {
         val patterns = mutableListOf<String>()
-
         if (text.contains("Repository Pattern")) patterns.add("- Repository Pattern")
         if (text.contains("Service Layer Pattern")) patterns.add("- Service Layer Pattern")
         if (text.contains("Controller Pattern")) patterns.add("- Controller Pattern")
         if (text.contains("Dependency Injection")) patterns.add("- Dependency Injection")
         if (text.contains("Domain Model Pattern")) patterns.add("- Domain Model Pattern")
-
         return if (patterns.isNotEmpty()) patterns.joinToString("\n") else "- Standard Spring Boot patterns"
     }
 
@@ -549,41 +581,35 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
     private fun extractComponentBreakdown(text: String): String {
         val lines = text.lines()
         val breakdown = mutableListOf<String>()
-
         lines.forEach { line ->
             if (line.contains("Controllers:") || line.contains("Services:") ||
                     line.contains("Repositories:") || line.contains("Entities:")) {
                 breakdown.add("- ${line.trim()}")
             }
         }
-
         return if (breakdown.isNotEmpty()) breakdown.joinToString("\n") else "- Component breakdown not available"
     }
 
     private fun extractPackageDistribution(text: String): String {
         val lines = text.lines()
         val packages = mutableListOf<String>()
-
         lines.forEach { line ->
             if (line.contains("tn.esprit") || line.contains("com.example")) {
                 packages.add("- ${line.trim()}")
             }
         }
-
         return if (packages.isNotEmpty()) packages.take(5).joinToString("\n") else "- Package distribution not available"
     }
 
     private fun extractComplexityAnalysis(text: String): String {
         val lines = text.lines()
         val complexity = mutableListOf<String>()
-
         lines.forEach { line ->
             if (line.contains("Low Complexity") || line.contains("Medium Complexity") ||
                     line.contains("High Complexity") || line.contains("Average")) {
                 complexity.add("- ${line.trim()}")
             }
         }
-
         return if (complexity.isNotEmpty()) complexity.joinToString("\n") else "- Low complexity codebase"
     }
 
@@ -596,27 +622,22 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
 
     private fun extractStrengths(text: String): String {
         val strengths = mutableListOf<String>()
-
         if (text.contains("service layer separation")) strengths.add("- Well-defined service layer")
         if (text.contains("domain models")) strengths.add("- Clear domain model structure")
         if (text.contains("separation of concerns")) strengths.add("- Good separation of concerns")
-
         return if (strengths.isNotEmpty()) strengths.joinToString("\n") else "- Well-structured Spring Boot application"
     }
 
     private fun extractAreasForImprovement(text: String): String {
         val areas = mutableListOf<String>()
-
         if (text.contains("test coverage")) areas.add("- Consider adding comprehensive test coverage")
         if (text.contains("error handling")) areas.add("- Implement proper error handling")
         if (text.contains("documentation")) areas.add("- Add API documentation")
-
         return if (areas.isNotEmpty()) areas.joinToString("\n") else "- No major issues detected"
     }
 
     private fun extractCleanRecommendations(text: String): Map<String, String> {
         val recommendations = mutableMapOf<String, String>()
-
         val immediate = mutableListOf<String>()
         val longterm = mutableListOf<String>()
         val bestpractices = mutableListOf<String>()
@@ -650,6 +671,105 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
         patternsArea.text = ""
         relationshipsArea.text = ""
         insightsArea.text = ""
+    }
+
+    /**
+     * Setup Q&A panel at the bottom
+     */
+    private fun setupQAPanel(): JPanel {
+        val qaPanel = JPanel(BorderLayout())
+        qaPanel.preferredSize = java.awt.Dimension(0, 200) // Fixed height
+        qaPanel.border = javax.swing.BorderFactory.createTitledBorder("💬 Ask Questions About Documentation")
+
+        // Input section
+        val inputPanel = JPanel(BorderLayout(5, 0))
+        questionField.toolTipText = "Ask questions like: 'How many controllers?', 'Explain the architecture', 'List all services'"
+
+        askButton.toolTipText = "Ask question (or press Enter)"
+        clearQAButton.toolTipText = "Clear Q&A history"
+        clearQAButton.font = Font("SansSerif", Font.PLAIN, 10)
+
+        val buttonPanel = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0))
+        buttonPanel.add(askButton)
+        buttonPanel.add(clearQAButton)
+
+        inputPanel.add(JLabel("Question: "), BorderLayout.WEST)
+        inputPanel.add(questionField, BorderLayout.CENTER)
+        inputPanel.add(buttonPanel, BorderLayout.EAST)
+
+        // History section with scroll
+        val scrollPane = JBScrollPane(qaHistoryArea)
+        scrollPane.verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_ALWAYS
+        scrollPane.horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+
+        qaPanel.add(inputPanel, BorderLayout.NORTH)
+        qaPanel.add(scrollPane, BorderLayout.CENTER)
+
+        return qaPanel
+    }
+
+    /**
+     * Process user question using QAManager
+     */
+    private fun processQuestion() {
+        val question = questionField.text.trim()
+        if (question.isEmpty()) {
+            return
+        }
+
+        // Disable ask button during processing
+        askButton.isEnabled = false
+        val originalText = askButton.text
+        askButton.text = "⏳"
+
+        // Add question to history immediately
+        appendToQAHistory("Q: $question")
+        questionField.text = ""
+
+        // Process in background thread
+        Thread {
+            try {
+                val answer = qaManager.processQuestion(question, currentResult)
+
+                SwingUtilities.invokeLater {
+                    appendToQAHistory("A: $answer")
+                    appendToQAHistory("") // Empty line for spacing
+
+                    // Auto-scroll to bottom
+                    qaHistoryArea.caretPosition = qaHistoryArea.document.length
+
+                    askButton.text = originalText
+                    askButton.isEnabled = true
+                }
+            } catch (e: Exception) {
+                SwingUtilities.invokeLater {
+                    appendToQAHistory("A: ❌ Error processing question: ${e.message}")
+                    appendToQAHistory("")
+
+                    askButton.text = originalText
+                    askButton.isEnabled = true
+                }
+                e.printStackTrace()
+            }
+        }.start()
+    }
+
+    /**
+     * Append text to Q&A history
+     */
+    private fun appendToQAHistory(text: String) {
+        if (qaHistoryArea.text.contains("Ask questions about your documentation here")) {
+            // Clear initial help text on first question
+            qaHistoryArea.text = ""
+        }
+        qaHistoryArea.append("$text\n")
+    }
+
+    /**
+     * Clear Q&A history
+     */
+    private fun clearQAHistory() {
+        qaHistoryArea.text = "💬 Ask questions about your documentation here...\n\nExamples:\n• How many controllers do I have?\n• List all services\n• Explain the architecture\n• What patterns were detected?"
     }
 
     fun getContentPanel(): JPanel {
