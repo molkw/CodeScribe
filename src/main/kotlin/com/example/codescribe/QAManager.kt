@@ -246,7 +246,7 @@ class QAManager {
     private fun extractRelevantSection(text: String, keyword: String): String {
         val lines = text.lines()
         val relevantLines = lines.filter { line ->
-            line.lowercase().contains(keyword.lowercase())
+            line.lowercase().contains(keyword.lowercase())!!
         }
         return if (relevantLines.isNotEmpty()) {
             relevantLines.take(5).joinToString("\n")
