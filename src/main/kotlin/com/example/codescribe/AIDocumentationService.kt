@@ -93,6 +93,13 @@ data class QuestionResponse(
         val processedLocally: Boolean = false
 )
 
+data class ProjectQuestionRequest(
+        @SerializedName("question")
+        val question: String,
+        @SerializedName("project_context")
+        val projectContext: String
+)
+
 class AIDocumentationService {
     private val httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -367,6 +374,68 @@ class AIDocumentationService {
             activeBaseUrl = null
             lastHealthCheckTime = 0L
             "❌ Connection failed: ${e.message}"
+        }
+    }
+
+    /**
+     * Ask a question about the project source code with AI backend (Project mode)
+     */
+    fun askProjectQuestion(question: String, projectContext: String): String {
+        val baseUrl = getAvailableBaseUrl()
+
+        if (baseUrl == null) {
+            return """
+                ❌ AI Backend unavailable
+                
+                Cannot process project questions without AI backend.
+                Please check your backend connection.
+            """.trimIndent()
+        }
+
+        return try {
+            logger.info("🔍 Asking project question to AI backend: $baseUrl")
+            logger.debug("📝 Project Question: $question")
+            logger.debug("📊 Project context size: ${projectContext.length} characters")
+
+            val request = ProjectQuestionRequest(
+                    question = question,
+                    projectContext = projectContext
+            )
+
+            val requestJson = gson.toJson(request)
+
+            val httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create("$baseUrl/project-question"))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofMinutes(2)) // Longer timeout for project analysis
+                    .POST(HttpRequest.BodyPublishers.ofString(requestJson))
+                    .build()
+
+            val response = httpClient.send(
+                    httpRequest,
+                    HttpResponse.BodyHandlers.ofString()
+            )
+
+            logger.info("📡 AI backend project Q&A response: ${response.statusCode()}")
+
+            when (response.statusCode()) {
+                200 -> {
+                    val questionResponse = gson.fromJson(response.body(), QuestionResponse::class.java)
+                    logger.info("✅ Project Q&A successful!")
+                    questionResponse.answer
+                }
+                else -> {
+                    logger.warn("❌ AI backend project Q&A error: ${response.statusCode()} - ${response.body()}")
+                    "❌ AI backend error: Unable to process project question (Status: ${response.statusCode()})\n\n" +
+                            "This may be due to large file size or AI processing limitations."
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("❌ Failed to ask project question to AI backend ($baseUrl): ${e.message}", e)
+            // If this backend failed, invalidate the cache to force re-check next time
+            activeBaseUrl = null
+            lastHealthCheckTime = 0L
+            "❌ Connection failed: ${e.message}\n\nProject questions require stable AI backend connection."
         }
     }
 }

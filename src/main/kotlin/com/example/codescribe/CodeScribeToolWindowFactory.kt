@@ -48,12 +48,18 @@ class CodeScribeToolWindowContent(private val project: Project) {
     private val clearQAButton = JButton("Clear Q&A")
     private val qaHistoryArea = JTextArea()
 
+    // Mode selection components
+    private val documentationModeRadio = JRadioButton("📄 Documentation (fast)", true)
+    private val projectModeRadio = JRadioButton("🔍 Project (detailed but very slow)", false)
+    private val modeButtonGroup = ButtonGroup()
+    private val progressLabel = JLabel(" ")
+
     // Status display
     private val statusLabel = JLabel("Ready to analyze project...")
 
     // Generator, Q&A manager and current results
     private val generator = AIIntegratedGenerator(project)
-    private val qaManager = QAManager()
+    private val qaManager = QAManager(project)
     private var currentResult: DocumentationResult? = null
 
     init {
@@ -76,7 +82,18 @@ class CodeScribeToolWindowContent(private val project: Project) {
         qaHistoryArea.font = Font("Monospaced", Font.PLAIN, 11)
         qaHistoryArea.lineWrap = true
         qaHistoryArea.wrapStyleWord = true
-        qaHistoryArea.text = "💬 Ask questions about your documentation here...\n\nExamples:\n• How many controllers do I have?\n• List all services\n• Explain the architecture\n• What patterns were detected?"
+        qaHistoryArea.text = "💬 Ask questions about your documentation here...\n\nExamples:\n• How many controllers do I have?\n• List all services\n• Explain the architecture\n• What patterns were detected?\n\n🔍 Project mode examples:\n• What database is the project using?\n• Which class creates a new student?\n• What are the attributes of the Student entity?"
+
+        // Setup mode selection
+        modeButtonGroup.add(documentationModeRadio)
+        modeButtonGroup.add(projectModeRadio)
+
+        documentationModeRadio.toolTipText = "Fast answers from generated documentation"
+        projectModeRadio.toolTipText = "Detailed answers by analyzing actual source code (slower)"
+
+        // Setup progress label
+        progressLabel.font = Font("SansSerif", Font.ITALIC, 10)
+        progressLabel.foreground = java.awt.Color.BLUE
 
         // Add tabs with better descriptions
         tabbedPane.addTab("📊 Overview", JBScrollPane(overviewArea))
@@ -146,6 +163,13 @@ class CodeScribeToolWindowContent(private val project: Project) {
         // Allow Enter key to ask question
         questionField.addActionListener {
             processQuestion()
+        }
+
+        // Setup QA Manager progress callback
+        qaManager.progressCallback = { progress ->
+            SwingUtilities.invokeLater {
+                progressLabel.text = progress
+            }
         }
     }
 
@@ -678,12 +702,15 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
      */
     private fun setupQAPanel(): JPanel {
         val qaPanel = JPanel(BorderLayout())
-        qaPanel.preferredSize = java.awt.Dimension(0, 200) // Fixed height
-        qaPanel.border = javax.swing.BorderFactory.createTitledBorder("💬 Ask Questions About Documentation")
+        qaPanel.preferredSize = java.awt.Dimension(0, 250) // Slightly taller for mode selection
+        qaPanel.border = javax.swing.BorderFactory.createTitledBorder("💬 Ask Questions About Your Project")
 
-        // Input section
-        val inputPanel = JPanel(BorderLayout(5, 0))
-        questionField.toolTipText = "Ask questions like: 'How many controllers?', 'Explain the architecture', 'List all services'"
+        // Input section with mode selection
+        val inputPanel = JPanel(BorderLayout(5, 5))
+
+        // Question input row
+        val questionPanel = JPanel(BorderLayout(5, 0))
+        questionField.toolTipText = "Ask questions about documentation or project source code"
 
         askButton.toolTipText = "Ask question (or press Enter)"
         clearQAButton.toolTipText = "Clear Q&A history"
@@ -693,9 +720,27 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
         buttonPanel.add(askButton)
         buttonPanel.add(clearQAButton)
 
-        inputPanel.add(JLabel("Question: "), BorderLayout.WEST)
-        inputPanel.add(questionField, BorderLayout.CENTER)
-        inputPanel.add(buttonPanel, BorderLayout.EAST)
+        questionPanel.add(JLabel("Question: "), BorderLayout.WEST)
+        questionPanel.add(questionField, BorderLayout.CENTER)
+        questionPanel.add(buttonPanel, BorderLayout.EAST)
+
+        // Mode selection row
+        val modePanel = JPanel(FlowLayout(FlowLayout.LEFT, 10, 2))
+        modePanel.add(JLabel("Mode:"))
+        modePanel.add(documentationModeRadio)
+        modePanel.add(projectModeRadio)
+
+        // Progress row
+        val progressPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 0))
+        progressPanel.add(progressLabel)
+
+        // Combine input components
+        val topPanel = JPanel(BorderLayout())
+        topPanel.add(questionPanel, BorderLayout.NORTH)
+        topPanel.add(modePanel, BorderLayout.CENTER)
+        topPanel.add(progressPanel, BorderLayout.SOUTH)
+
+        inputPanel.add(topPanel, BorderLayout.CENTER)
 
         // History section with scroll
         val scrollPane = JBScrollPane(qaHistoryArea)
@@ -709,7 +754,7 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
     }
 
     /**
-     * Process user question using QAManager
+     * Process user question using QAManager with mode selection
      */
     private fun processQuestion() {
         val question = questionField.text.trim()
@@ -717,19 +762,30 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
             return
         }
 
+        // Determine selected mode
+        val selectedMode = if (documentationModeRadio.isSelected) {
+            QueryMode.DOCUMENTATION
+        } else {
+            QueryMode.PROJECT
+        }
+
         // Disable ask button during processing
         askButton.isEnabled = false
         val originalText = askButton.text
         askButton.text = "⏳"
 
+        // Clear previous progress
+        progressLabel.text = " "
+
         // Add question to history immediately
-        appendToQAHistory("Q: $question")
+        val modeLabel = if (selectedMode == QueryMode.DOCUMENTATION) "📄" else "🔍"
+        appendToQAHistory("$modeLabel Q: $question")
         questionField.text = ""
 
         // Process in background thread
         Thread {
             try {
-                val answer = qaManager.processQuestion(question, currentResult)
+                val answer = qaManager.processQuestion(question, selectedMode, currentResult)
 
                 SwingUtilities.invokeLater {
                     appendToQAHistory("A: $answer")
@@ -738,6 +794,8 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
                     // Auto-scroll to bottom
                     qaHistoryArea.caretPosition = qaHistoryArea.document.length
 
+                    // Clear progress and restore button
+                    progressLabel.text = " "
                     askButton.text = originalText
                     askButton.isEnabled = true
                 }
@@ -746,6 +804,8 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
                     appendToQAHistory("A: ❌ Error processing question: ${e.message}")
                     appendToQAHistory("")
 
+                    // Clear progress and restore button
+                    progressLabel.text = " "
                     askButton.text = originalText
                     askButton.isEnabled = true
                 }
@@ -769,7 +829,8 @@ ${if (result.isAIEnhanced) "- AI-powered insight generation" else ""}
      * Clear Q&A history
      */
     private fun clearQAHistory() {
-        qaHistoryArea.text = "💬 Ask questions about your documentation here...\n\nExamples:\n• How many controllers do I have?\n• List all services\n• Explain the architecture\n• What patterns were detected?"
+        qaHistoryArea.text = "💬 Ask questions about your documentation here...\n\nExamples:\n• How many controllers do I have?\n• List all services\n• Explain the architecture\n• What patterns were detected?\n\n🔍 Project mode examples:\n• What database is the project using?\n• Which class creates a new student?\n• What are the attributes of the Student entity?"
+        progressLabel.text = " " // Clear progress
     }
 
     fun getContentPanel(): JPanel {
